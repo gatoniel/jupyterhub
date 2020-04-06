@@ -1301,6 +1301,12 @@ class LocalProcessSpawner(Spawner):
         The process id (pid) of the single-user server process spawned for current user.
         """,
     )
+    # here we would need traitlets callable type...
+    preexec_fn_set = Integer(
+        0,
+        help="""
+        Set this to 1, when there is a different preexec_fn""",
+    )
 
     def make_preexec_fn(self, name):
         """
@@ -1308,7 +1314,14 @@ class LocalProcessSpawner(Spawner):
 
         This function can be safely passed to `preexec_fn` of `Popen`
         """
-        return set_user_setuid(name)
+        if self.preexec_fn_set == 0:
+            return set_user_setuid(name)
+        else:
+            return self.preexec_fn
+
+    def set_preexec_fn(self, fn):
+        self.preexec_fn = fn
+        self.preexec_fn_set = 1
 
     def load_state(self, state):
         """Restore state about spawned single-user server after a hub restart.

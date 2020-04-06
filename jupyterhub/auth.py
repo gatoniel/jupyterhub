@@ -26,6 +26,7 @@ from traitlets import Bool, Integer, Set, Unicode, Dict, Any, default, observe
 from .handlers.login import LoginHandler
 from .utils import maybe_future, url_path_join
 from .traitlets import Command
+from .spawner import set_user_setuid
 
 
 class Authenticator(LoggingConfigurable):
@@ -829,8 +830,8 @@ class PAMAuthenticator(LocalAuthenticator):
         help="""
         Whether to check the user's account status via PAM during authentication.
 
-        The PAM account stack performs non-authentication based account 
-        management. It is typically used to restrict/permit access to a 
+        The PAM account stack performs non-authentication based account
+        management. It is typically used to restrict/permit access to a
         service and this step is needed to access the host's user access control.
 
         Disabling this can be dangerous as authenticated but unauthorized users may
@@ -950,26 +951,70 @@ class PAMAuthenticator(LocalAuthenticator):
         """Open PAM session for user if so configured"""
         if not self.open_sessions:
             return
+        user_preexec_fn = set_user_setuid(user.name)
+        username = user.name
+        service = self.service
+        encoding = self.encoding
+
+        # create a PAM handle
         try:
-            pamela.open_session(user.name, service=self.service, encoding=self.encoding)
+            handle = pamela.pam_start(username, service, encoding)
         except pamela.PAMError as e:
-            self.log.warning("Failed to open PAM session for %s: %s", user.name, e)
+            self.log.warning("Failed to create PAM handle for %s: %s", username, e)
             self.log.warning("Disabling PAM sessions from now on.")
             self.open_sessions = False
+        # we save the handle in the spawner, then we can reuse it, when the
+        # session needs to be closed in the post_spawn_stop
+        spawner.PAM_handle = handle
+        def preexec_fn():
+            # process needs to be root to get through the PAM stack
+            os.setuid(0)
+            os.setgid(0)
+            # now make a call to pam_open_session
+            retval = pamela.PAM_OPEN_SESSION(handle, 0)
+            if retval != 0:
+                print(
+                        "Failed to open PAM session for {}: PAMError {}".format(
+                                user.name, retval
+                                ),
+                        file=sys.stderr
+                        )
+
+            # now set the uid and gid of the user
+            user_preexec_fn()
+
+        spawner.set_preexec_fn(preexec_fn)
 
     @run_on_executor
     def post_spawn_stop(self, user, spawner):
         """Close PAM session for user if we were configured to opened one"""
         if not self.open_sessions:
             return
+        # lets save our current uid, gid
+        tmp_uid = os.getuid()
+        tmp_gid = os.getgid()
+        # become root, to get though the PAM stack
+        os.setuid(0)
+        os.setgid(0)
         try:
-            pamela.close_session(
-                user.name, service=self.service, encoding=self.encoding
-            )
-        except pamela.PAMError as e:
-            self.log.warning("Failed to close PAM session for %s: %s", user.name, e)
-            self.log.warning("Disabling PAM sessions from now on.")
-            self.open_sessions = False
+            retval = pamela.PAM_CLOSE_SESSION(spawner.PAM_handle, 0)
+            if retval != 0:
+                self.log.warning("Failed to close PAM session for {}: PAMError {}".format(
+                        user.name, retval
+                        ))
+        except AttributeError:
+            self.log.warning("Could´t get PAM_handle. Trying to close PAM session differently...")
+            try:
+                pamela.close_session(
+                    user.name, service=self.service, encoding=self.encoding
+                )
+            except pamela.PAMError as e:
+                self.log.warning("Failed to close PAM session for %s: %s", user.name, e)
+                self.log.warning("Disabling PAM sessions from now on.")
+                self.open_sessions = False
+        # set uid, gid as they were before
+        os.setuid(tmp_uid)
+        os.setgid(tmp_gid)
 
     def normalize_username(self, username):
         """Round-trip the username to normalize it with PAM
