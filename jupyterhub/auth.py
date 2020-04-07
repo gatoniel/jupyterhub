@@ -11,6 +11,7 @@ from shutil import which
 from subprocess import PIPE
 from subprocess import Popen
 from subprocess import STDOUT
+from multiprocessing import Process
 
 try:
     import pamela
@@ -949,8 +950,10 @@ class PAMAuthenticator(LocalAuthenticator):
     @run_on_executor
     def pre_spawn_start(self, user, spawner):
         """Open PAM session for user if so configured"""
-        if not self.open_sessions:
-            return
+        # I dont know why, but setting this value via config.py did not work
+        # So I will not use it and always use pam sessions...
+        # if not self.open_sessions:
+        #     return
         user_preexec_fn = set_user_setuid(user.name)
         username = user.name
         service = self.service
@@ -988,33 +991,24 @@ class PAMAuthenticator(LocalAuthenticator):
     @run_on_executor
     def post_spawn_stop(self, user, spawner):
         """Close PAM session for user if we were configured to opened one"""
-        if not self.open_sessions:
-            return
-        # lets save our current uid, gid
-        tmp_uid = os.getuid()
-        tmp_gid = os.getgid()
-        # become root, to get though the PAM stack
-        os.setuid(0)
-        os.setgid(0)
+        # I dont know why, but setting this value via config.py did not work
+        # So I will not use it and always use pam sessions...
+        # if not self.open_sessions:
+        #     return
+        self.log.info("Going to close PAM session")
         try:
-            retval = pamela.PAM_CLOSE_SESSION(spawner.PAM_handle, 0)
-            if retval != 0:
-                self.log.warning("Failed to close PAM session for {}: PAMError {}".format(
-                        user.name, retval
-                        ))
+            p = Process(target=close_session_per_handle, args=(
+                    spawner.PAM_handle, self.log
+                    ))
+            p.start()
+            p.join()
         except AttributeError:
             self.log.warning("Could´t get PAM_handle. Trying to close PAM session differently...")
-            try:
-                pamela.close_session(
-                    user.name, service=self.service, encoding=self.encoding
-                )
-            except pamela.PAMError as e:
-                self.log.warning("Failed to close PAM session for %s: %s", user.name, e)
-                self.log.warning("Disabling PAM sessions from now on.")
-                self.open_sessions = False
-        # set uid, gid as they were before
-        os.setuid(tmp_uid)
-        os.setgid(tmp_gid)
+            p = Process(target=close_session_per_username, args=(
+                    user.name, self.service, self.encoding, self.log
+                    ))
+            p.start()
+            p.join()
 
     def normalize_username(self, username):
         """Round-trip the username to normalize it with PAM
@@ -1030,6 +1024,22 @@ class PAMAuthenticator(LocalAuthenticator):
         else:
             return super().normalize_username(username)
 
+def close_session_per_handle(handle, log):
+    os.setuid(0)
+    os.setgid(0)
+    retval = pamela.PAM_CLOSE_SESSION(handle, 0)
+    if retval != 0:
+        log.warning("Failed to close PAM session for {}: PAMError {}".format(
+                user.name, retval
+                ))
+
+def close_session_per_username(username, service, encoding, log):
+    os.setuid(0)
+    os.setgid(0)
+    try:
+        pamela.close_session(username, service=service, encoding=encoding)
+    except pamela.PAMError as e:
+        log.warning("Failed to close PAM session for %s: %s", user.name, e)
 
 class DummyAuthenticator(Authenticator):
     """Dummy Authenticator for testing
