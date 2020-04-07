@@ -961,7 +961,9 @@ class PAMAuthenticator(LocalAuthenticator):
 
         # create a PAM handle
         try:
-            handle = pamela.pam_start(username, service, encoding)
+            handle = pamela.pam_start(
+                    username=username, service=service, encoding=encoding
+                    )
         except pamela.PAMError as e:
             self.log.warning("Failed to create PAM handle for %s: %s", username, e)
             self.log.warning("Disabling PAM sessions from now on.")
