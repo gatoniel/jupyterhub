@@ -5,6 +5,7 @@ import inspect
 import pipes
 import re
 import sys
+import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from shutil import which
