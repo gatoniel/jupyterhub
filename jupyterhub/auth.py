@@ -912,7 +912,10 @@ class PAMAuthenticator(LocalAuthenticator):
 
         Return None otherwise.
         """
-        username = data['username']
+        # we use lowercase username, since JupyterHub is using the lowercase later anyway. There are
+        # system calls with this lowercase username. So this lowercase username must exist, otherwise
+        # system calls will fail. So the user has to be added as lower case either way...
+        username = data['username'].lower()
         try:
             pamela.authenticate(
                 username, data['password'], service=self.service, encoding=self.encoding
