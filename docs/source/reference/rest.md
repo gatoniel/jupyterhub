@@ -57,6 +57,9 @@ generating an API token is available from the JupyterHub user interface:
 
 ## Add API tokens to the config file
 
+**This is deprecated. We are in no rush to remove this feature,
+but please consider if service tokens are right for you.**
+
 You may also add a dictionary of API tokens and usernames to the hub's
 configuration file, `jupyterhub_config.py` (note that
 the **key** is the 'secret-token' while the **value** is the 'username'):
@@ -66,6 +69,41 @@ c.JupyterHub.api_tokens = {
     'secret-token': 'username',
 }
 ```
+
+### Updating to admin services
+
+The `api_tokens` configuration has been softly deprecated since the introduction of services.
+We have no plans to remove it,
+but users are encouraged to use service configuration instead.
+
+If you have been using `api_tokens` to create an admin user
+and a token for that user to perform some automations,
+the services mechanism may be a better fit.
+If you have the following configuration:
+
+```python
+c.JupyterHub.admin_users = {"service-admin",}
+c.JupyterHub.api_tokens = {
+    "secret-token": "service-admin",
+}
+```
+
+This can be updated to create an admin service, with the following configuration:
+
+```python
+c.JupyterHub.services = [
+    {
+        "name": "service-token",
+        "admin": True,
+        "api_token": "secret-token",
+    },
+]
+```
+
+The token will have the same admin permissions,
+but there will no longer be a user account created to house it.
+The main noticeable difference is that there will be no notebook server associated with the account
+and the service will not show up in the various user list pages and APIs.
 
 ## Make an API request
 
@@ -131,7 +169,7 @@ curl -X POST -H "Authorization: token <token>" "http://127.0.0.1:8081/hub/api/us
 ```
 
 With the named-server functionality, it's now possible to launch more than one
-specifically named servers against a given user.  This could be used, for instance,
+specifically named servers against a given user. This could be used, for instance,
 to launch each server based on a different image.
 
 First you must enable named-servers by including the following setting in the `jupyterhub_config.py` file.
@@ -149,6 +187,7 @@ hub:
 ```
 
 With that setting in place, a new named-server is activated like this:
+
 ```bash
 curl -X POST -H "Authorization: token <token>" "http://127.0.0.1:8081/hub/api/users/<user>/servers/<serverA>"
 curl -X POST -H "Authorization: token <token>" "http://127.0.0.1:8081/hub/api/users/<user>/servers/<serverB>"
@@ -163,7 +202,6 @@ will need to be able to handle the case of multiple servers per user and ensure
 uniqueness of names, particularly if servers are spawned via docker containers
 or kubernetes pods.
 
-
 ## Learn more about the API
 
 You can see the full [JupyterHub REST API][] for details. This REST API Spec can
@@ -172,6 +210,6 @@ Both resources contain the same information and differ only in its display.
 Note: The Swagger specification is being renamed the [OpenAPI Initiative][].
 
 [interactive style on swagger's petstore]: http://petstore.swagger.io/?url=https://raw.githubusercontent.com/jupyterhub/jupyterhub/master/docs/rest-api.yml#!/default
-[OpenAPI Initiative]: https://www.openapis.org/
-[JupyterHub REST API]: ./rest-api
-[Jupyter Notebook REST API]: http://petstore.swagger.io/?url=https://raw.githubusercontent.com/jupyter/notebook/master/notebook/services/api/api.yaml
+[openapi initiative]: https://www.openapis.org/
+[jupyterhub rest api]: ./rest-api
+[jupyter notebook rest api]: http://petstore.swagger.io/?url=https://raw.githubusercontent.com/jupyter/notebook/master/notebook/services/api/api.yaml

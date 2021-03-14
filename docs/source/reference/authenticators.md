@@ -89,7 +89,6 @@ class DictionaryAuthenticator(Authenticator):
             return data['username']
 ```
 
-
 #### Normalize usernames
 
 Since the Authenticator and Spawner both use the same username,
@@ -111,10 +110,9 @@ When using `PAMAuthenticator`, you can set
 normalize usernames using PAM (basically round-tripping them: username
 to uid to username), which is useful in case you use some external
 service that allows multiple usernames mapping to the same user (such
-as ActiveDirectory, yes, this really happens).  When
-`pam_normalize_username` is on, usernames are *not* normalized to
+as ActiveDirectory, yes, this really happens). When
+`pam_normalize_username` is on, usernames are _not_ normalized to
 lowercase.
-
 
 #### Validate usernames
 
@@ -132,7 +130,6 @@ To only allow usernames that start with 'w':
 c.Authenticator.username_pattern = r'w.*'
 ```
 
-
 ### How to write a custom authenticator
 
 You can use custom Authenticator subclasses to enable authentication
@@ -144,7 +141,6 @@ For example, the Authenticator methods, [pre_spawn_start(user, spawner)][]
 and [post_spawn_stop(user, spawner)][], are hooks that can be used to do
 auth-related startup (e.g. opening PAM sessions) and cleanup
 (e.g. closing PAM sessions).
-
 
 See a list of custom Authenticators [on the wiki](https://github.com/jupyterhub/jupyterhub/wiki/Authenticators).
 
@@ -186,7 +182,6 @@ Additionally, configurable attributes for your authenticator will
 appear in jupyterhub help output and auto-generated configuration files
 via `jupyterhub --generate-config`.
 
-
 ### Authentication state
 
 JupyterHub 0.8 adds the ability to persist state related to authentication,
@@ -220,11 +215,9 @@ To store auth_state, two conditions must be met:
    export JUPYTERHUB_CRYPT_KEY=$(openssl rand -hex 32)
    ```
 
-
 JupyterHub uses [Fernet](https://cryptography.io/en/latest/fernet/) to encrypt auth_state.
 To facilitate key-rotation, `JUPYTERHUB_CRYPT_KEY` may be a semicolon-separated list of encryption keys.
 If there are multiple keys present, the **first** key is always used to persist any new auth_state.
-
 
 #### Using auth_state
 
@@ -235,10 +228,9 @@ to Spawner environment:
 
 ```python
 class MyAuthenticator(Authenticator):
-    @gen.coroutine
-    def authenticate(self, handler, data=None):
-        username = yield identify_user(handler, data)
-        upstream_token = yield token_for_user(username)
+    async def authenticate(self, handler, data=None):
+        username = await identify_user(handler, data)
+        upstream_token = await token_for_user(username)
         return {
             'name': username,
             'auth_state': {
@@ -246,10 +238,9 @@ class MyAuthenticator(Authenticator):
             },
         }
 
-    @gen.coroutine
-    def pre_spawn_start(self, user, spawner):
+    async def pre_spawn_start(self, user, spawner):
         """Pass upstream_token to spawner via environment variable"""
-        auth_state = yield user.get_auth_state()
+        auth_state = await user.get_auth_state()
         if not auth_state:
             # auth_state not enabled
             return
@@ -268,11 +259,10 @@ PAM session.
 
 Beginning with version 0.8, JupyterHub is an OAuth provider.
 
-
-[Authenticator]: https://github.com/jupyterhub/jupyterhub/blob/master/jupyterhub/auth.py
-[PAM]: https://en.wikipedia.org/wiki/Pluggable_authentication_module
-[OAuth]: https://en.wikipedia.org/wiki/OAuth
-[GitHub OAuth]: https://developer.github.com/v3/oauth/
-[OAuthenticator]: https://github.com/jupyterhub/oauthenticator
+[authenticator]: https://github.com/jupyterhub/jupyterhub/blob/master/jupyterhub/auth.py
+[pam]: https://en.wikipedia.org/wiki/Pluggable_authentication_module
+[oauth]: https://en.wikipedia.org/wiki/OAuth
+[github oauth]: https://developer.github.com/v3/oauth/
+[oauthenticator]: https://github.com/jupyterhub/oauthenticator
 [pre_spawn_start(user, spawner)]: https://jupyterhub.readthedocs.io/en/latest/api/auth.html#jupyterhub.auth.Authenticator.pre_spawn_start
 [post_spawn_stop(user, spawner)]: https://jupyterhub.readthedocs.io/en/latest/api/auth.html#jupyterhub.auth.Authenticator.post_spawn_stop

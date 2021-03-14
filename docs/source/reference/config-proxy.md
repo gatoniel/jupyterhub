@@ -6,12 +6,12 @@ SSL port `443`. This could be useful if the JupyterHub server machine is also
 hosting other domains or content on `443`. The goal in this example is to
 satisfy the following:
 
-* JupyterHub is running on a server, accessed *only* via `HUB.DOMAIN.TLD:443`
-* On the same machine, `NO_HUB.DOMAIN.TLD` strictly serves different content,
+- JupyterHub is running on a server, accessed _only_ via `HUB.DOMAIN.TLD:443`
+- On the same machine, `NO_HUB.DOMAIN.TLD` strictly serves different content,
   also on port `443`
-* `nginx` or `apache` is used as the public access point (which means that
-  only nginx/apache will bind  to `443`)
-* After testing, the server in question should be able to score at least an A on the
+- `nginx` or `apache` is used as the public access point (which means that
+  only nginx/apache will bind to `443`)
+- After testing, the server in question should be able to score at least an A on the
   Qualys SSL Labs [SSL Server Test](https://www.ssllabs.com/ssltest/)
 
 Let's start out with needed JupyterHub configuration in `jupyterhub_config.py`:
@@ -83,8 +83,12 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
         # websocket headers
+        proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Scheme $scheme;
+
+        proxy_buffering off;
     }
 
     # Managing requests to verify letsencrypt host
@@ -139,6 +143,21 @@ Now restart `nginx`, restart the JupyterHub, and enjoy accessing
 `https://HUB.DOMAIN.TLD` while serving other content securely on
 `https://NO_HUB.DOMAIN.TLD`.
 
+### SELinux permissions for nginx
+
+On distributions with SELinux enabled (e.g. Fedora), one may encounter permission errors
+when the nginx service is started.
+
+We need to allow nginx to perform network relay and connect to the jupyterhub port. The
+following commands do that:
+
+```bash
+semanage port -a -t http_port_t -p tcp 8000
+setsebool -P httpd_can_network_relay 1
+setsebool -P httpd_can_network_connect 1
+```
+
+Replace 8000 with the port the jupyterhub server is running from.
 
 ## Apache
 
@@ -193,22 +212,24 @@ Listen 443
 </VirtualHost>
 ```
 
- 
 In case of the need to run the jupyterhub under /jhub/ or other location please use the below configurations:
+
 - JupyterHub running locally at http://127.0.0.1:8000/jhub/ or other location
 
 httpd.conf amendments:
+
 ```bash
- RewriteRule /jhub/(.*) ws://127.0.0.1:8000/jhub/$1 [P,L]
- RewriteRule /jhub/(.*) http://127.0.0.1:8000/jhub/$1 [P,L]
- 
+ RewriteRule /jhub/(.*) ws://127.0.0.1:8000/jhub/$1 [NE.P,L]
+ RewriteRule /jhub/(.*) http://127.0.0.1:8000/jhub/$1 [NE,P,L]
+
  ProxyPass /jhub/ http://127.0.0.1:8000/jhub/
  ProxyPassReverse /jhub/  http://127.0.0.1:8000/jhub/
- ```
- 
+```
+
 jupyterhub_config.py amendments:
- ```bash
-  --The public facing URL of the whole JupyterHub application.
-  --This is the address on which the proxy will bind. Sets protocol, ip, base_url
-  c.JupyterHub.bind_url = 'http://127.0.0.1:8000/jhub/'
-  ```
+
+```bash
+ --The public facing URL of the whole JupyterHub application.
+ --This is the address on which the proxy will bind. Sets protocol, ip, base_url
+ c.JupyterHub.bind_url = 'http://127.0.0.1:8000/jhub/'
+```

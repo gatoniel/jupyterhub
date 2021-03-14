@@ -4,8 +4,6 @@ Contains base Spawner class & default implementation
 # Copyright (c) Jupyter Development Team.
 # Distributed under the terms of the Modified BSD License.
 import ast
-import asyncio
-import errno
 import json
 import os
 import pipes
@@ -15,11 +13,11 @@ import sys
 import warnings
 from subprocess import Popen
 from tempfile import mkdtemp
+from urllib.parse import urlparse
 
 if os.name == 'nt':
     import psutil
-from async_generator import async_generator
-from async_generator import yield_
+from async_generator import aclosing
 from sqlalchemy import inspect
 from tornado.ioloop import PeriodicCallback
 from traitlets import Any
@@ -356,8 +354,9 @@ class Spawner(LoggingConfigurable):
 
         return options_form
 
-    def options_from_form(self, form_data):
-        """Interpret HTTP form data
+    options_from_form = Callable(
+        help="""
+        Interpret HTTP form data
 
         Form data will always arrive as a dict of lists of strings.
         Override this function to understand single-values, numbers, etc.
@@ -381,8 +380,46 @@ class Spawner(LoggingConfigurable):
             (with additional support for bytes in case of uploaded file data),
             and any non-bytes non-jsonable values will be replaced with None
             if the user_options are re-used.
-        """
+        """,
+    ).tag(config=True)
+
+    @default("options_from_form")
+    def _options_from_form(self):
+        return self._default_options_from_form
+
+    def _default_options_from_form(self, form_data):
         return form_data
+
+    def options_from_query(self, query_data):
+        """Interpret query arguments passed to /spawn
+
+        Query arguments will always arrive as a dict of unicode strings.
+        Override this function to understand single-values, numbers, etc.
+
+        By default, options_from_form is called from this function. You can however override
+        this function if you need to process the query arguments differently.
+
+        This should coerce form data into the structure expected by self.user_options,
+        which must be a dict, and should be JSON-serializeable,
+        though it can contain bytes in addition to standard JSON data types.
+
+        This method should not have any side effects.
+        Any handling of `user_options` should be done in `.start()`
+        to ensure consistent behavior across servers
+        spawned via the API and form submission page.
+
+        Instances will receive this data on self.user_options, after passing through this function,
+        prior to `Spawner.start`.
+
+        .. versionadded:: 1.2
+            user_options are persisted in the JupyterHub database to be reused
+            on subsequent spawns if no options are given.
+            user_options is serialized to JSON as part of this persistence
+            (with additional support for bytes in case of uploaded file data),
+            and any non-bytes non-jsonable values will be replaced with None
+            if the user_options are re-used.
+        """
+        return self.options_from_form(query_data)
 
     user_options = Dict(
         help="""
@@ -402,11 +439,12 @@ class Spawner(LoggingConfigurable):
             'VIRTUAL_ENV',
             'LANG',
             'LC_ALL',
+            'JUPYTERHUB_SINGLEUSER_APP',
         ],
         help="""
-        Whitelist of environment variables for the single-user server to inherit from the JupyterHub process.
+        List of environment variables for the single-user server to inherit from the JupyterHub process.
 
-        This whitelist is used to ensure that sensitive information in the JupyterHub process's environment
+        This list is used to ensure that sensitive information in the JupyterHub process's environment
         (such as `CONFIGPROXY_AUTH_TOKEN`) is not passed to the single-user server's process.
         """,
     ).tag(config=True)
@@ -425,7 +463,7 @@ class Spawner(LoggingConfigurable):
 
         Environment variables that end up in the single-user server's process come from 3 sources:
           - This `environment` configurable
-          - The JupyterHub process' environment variables that are whitelisted in `env_keep`
+          - The JupyterHub process' environment variables that are listed in `env_keep`
           - Variables to establish contact between the single-user notebook and the hub (such as JUPYTERHUB_API_TOKEN)
 
         The `environment` configurable should be set by JupyterHub administrators to add
@@ -436,6 +474,11 @@ class Spawner(LoggingConfigurable):
 
         Note that the spawner class' interface is not guaranteed to be exactly same across upgrades,
         so if you are using the callable take care to verify it continues to work after upgrades!
+
+        .. versionchanged:: 1.2
+            environment from this configuration has highest priority,
+            allowing override of 'default' env variables,
+            such as JUPYTERHUB_API_URL.
         """
     ).tag(config=True)
 
@@ -648,6 +691,19 @@ class Spawner(LoggingConfigurable):
         """
     ).tag(config=True)
 
+    hub_connect_url = Unicode(
+        None,
+        allow_none=True,
+        help="""
+        The URL the single-user server should connect to the Hub.
+
+        If the Hub URL set in your JupyterHub config is not reachable
+        from spawned notebooks, you can set differnt URL by this config.
+
+        Is None if you don't need to change the URL.
+        """,
+    ).tag(config=True)
+
     def load_state(self, state):
         """Restore state of spawner from database.
 
@@ -709,16 +765,6 @@ class Spawner(LoggingConfigurable):
             if key in os.environ:
                 env[key] = os.environ[key]
 
-        # config overrides. If the value is a callable, it will be called with
-        # one parameter - the current spawner instance - and the return value
-        # will be assigned to the environment variable. This will be called at
-        # spawn time.
-        for key, value in self.environment.items():
-            if callable(value):
-                env[key] = value(self)
-            else:
-                env[key] = value
-
         env['JUPYTERHUB_API_TOKEN'] = self.api_token
         # deprecated (as of 0.7.2), for old versions of singleuser
         env['JPY_API_TOKEN'] = self.api_token
@@ -736,9 +782,15 @@ class Spawner(LoggingConfigurable):
         # Info previously passed on args
         env['JUPYTERHUB_USER'] = self.user.name
         env['JUPYTERHUB_SERVER_NAME'] = self.name
-        env['JUPYTERHUB_API_URL'] = self.hub.api_url
+        if self.hub_connect_url is not None:
+            hub_api_url = url_path_join(
+                self.hub_connect_url, urlparse(self.hub.api_url).path
+            )
+        else:
+            hub_api_url = self.hub.api_url
+        env['JUPYTERHUB_API_URL'] = hub_api_url
         env['JUPYTERHUB_ACTIVITY_URL'] = url_path_join(
-            self.hub.api_url,
+            hub_api_url,
             'users',
             # tolerate mocks defining only user.name
             getattr(self.user, 'escaped_name', self.user.name),
@@ -765,6 +817,18 @@ class Spawner(LoggingConfigurable):
             env['JUPYTERHUB_SSL_KEYFILE'] = self.cert_paths['keyfile']
             env['JUPYTERHUB_SSL_CERTFILE'] = self.cert_paths['certfile']
             env['JUPYTERHUB_SSL_CLIENT_CA'] = self.cert_paths['cafile']
+
+        # env overrides from config. If the value is a callable, it will be called with
+        # one parameter - the current spawner instance - and the return value
+        # will be assigned to the environment variable. This will be called at
+        # spawn time.
+        # Called last to ensure highest priority, in case of overriding other
+        # 'default' variables like the API url
+        for key, value in self.environment.items():
+            if callable(value):
+                env[key] = value(self)
+            else:
+                env[key] = value
 
         return env
 
@@ -906,14 +970,13 @@ class Spawner(LoggingConfigurable):
 
         Arguments:
             paths (dict): a list of paths for key, cert, and CA.
-            These paths will be resolvable and readable by the Hub process,
-            but not necessarily by the notebook server.
+                These paths will be resolvable and readable by the Hub process,
+                but not necessarily by the notebook server.
 
         Returns:
-            dict: a list (potentially altered) of paths for key, cert,
-            and CA.
-            These paths should be resolvable and readable
-            by the notebook server to be launched.
+            dict: a list (potentially altered) of paths for key, cert, and CA.
+                These paths should be resolvable and readable by the notebook
+                server to be launched.
 
 
         `.move_certs` is called after certs for the singleuser notebook have
@@ -952,7 +1015,9 @@ class Spawner(LoggingConfigurable):
             args.append('--notebook-dir=%s' % _quote_safe(notebook_dir))
         if self.default_url:
             default_url = self.format_string(self.default_url)
-            args.append('--NotebookApp.default_url=%s' % _quote_safe(default_url))
+            args.append(
+                '--SingleUserNotebookApp.default_url=%s' % _quote_safe(default_url)
+            )
 
         if self.debug:
             args.append('--debug')
@@ -986,7 +1051,6 @@ class Spawner(LoggingConfigurable):
     def _progress_url(self):
         return self.user.progress_url(self.name)
 
-    @async_generator
     async def _generate_progress(self):
         """Private wrapper of progress generator
 
@@ -998,20 +1062,16 @@ class Spawner(LoggingConfigurable):
             )
             return
 
-        await yield_({"progress": 0, "message": "Server requested"})
-        from async_generator import aclosing
+        yield {"progress": 0, "message": "Server requested"}
 
         async with aclosing(self.progress()) as progress:
             async for event in progress:
-                await yield_(event)
+                yield event
 
-    @async_generator
     async def progress(self):
         """Async generator for progress events
 
         Must be an async generator
-
-        For Python 3.5-compatibility, use the async_generator package
 
         Should yield messages of the form:
 
@@ -1029,7 +1089,7 @@ class Spawner(LoggingConfigurable):
 
         .. versionadded:: 0.9
         """
-        await yield_({"progress": 50, "message": "Spawning server..."})
+        yield {"progress": 50, "message": "Spawning server..."}
 
     async def start(self):
         """Start the single-user server
@@ -1040,9 +1100,7 @@ class Spawner(LoggingConfigurable):
         .. versionchanged:: 0.7
             Return ip, port instead of setting on self.user.server directly.
         """
-        raise NotImplementedError(
-            "Override in subclass. Must be a Tornado gen.coroutine."
-        )
+        raise NotImplementedError("Override in subclass. Must be a coroutine.")
 
     async def stop(self, now=False):
         """Stop the single-user server
@@ -1055,9 +1113,7 @@ class Spawner(LoggingConfigurable):
 
         Must be a coroutine.
         """
-        raise NotImplementedError(
-            "Override in subclass. Must be a Tornado gen.coroutine."
-        )
+        raise NotImplementedError("Override in subclass. Must be a coroutine.")
 
     async def poll(self):
         """Check if the single-user process is running
@@ -1083,9 +1139,7 @@ class Spawner(LoggingConfigurable):
           process has not yet completed.
 
         """
-        raise NotImplementedError(
-            "Override in subclass. Must be a Tornado gen.coroutine."
-        )
+        raise NotImplementedError("Override in subclass. Must be a coroutine.")
 
     def add_poll_callback(self, callback, *args, **kwargs):
         """Add a callback to fire when the single-user server stops"""
@@ -1593,5 +1647,5 @@ class SimpleLocalProcessSpawner(LocalProcessSpawner):
         return env
 
     def move_certs(self, paths):
-        """No-op for installing certs"""
+        """No-op for installing certs."""
         return paths

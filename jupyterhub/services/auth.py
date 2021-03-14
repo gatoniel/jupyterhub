@@ -19,11 +19,11 @@ import string
 import time
 import uuid
 import warnings
+from unittest import mock
 from urllib.parse import quote
 from urllib.parse import urlencode
 
 import requests
-from tornado.gen import coroutine
 from tornado.httputil import url_concat
 from tornado.log import app_log
 from tornado.web import HTTPError
@@ -288,7 +288,7 @@ class HubAuth(SingletonConfigurable):
 
     def _check_hub_authorization(self, url, cache_key=None, use_cache=True):
         """Identify a user with the Hub
-        
+
         Args:
             url (str): The API URL to check the Hub for authorization
                        (e.g. http://127.0.0.1:8081/hub/api/authorizations/token/abc-def)
@@ -371,9 +371,13 @@ class HubAuth(SingletonConfigurable):
             )
             app_log.warning(r.text)
             msg = "Failed to check authorization"
-            # pass on error_description from oauth failure
+            # pass on error from oauth failure
             try:
-                description = r.json().get("error_description")
+                response = r.json()
+                # prefer more specific 'error_description', fallback to 'error'
+                description = response.get(
+                    "error_description", response.get("error", "Unknown error")
+                )
             except Exception:
                 pass
             else:
@@ -600,10 +604,10 @@ class HubOAuth(HubAuth):
 
     def token_for_code(self, code):
         """Get token for OAuth temporary code
-        
+
         This is the last step of OAuth login.
         Should be called in OAuth Callback handler.
-        
+
         Args:
             code (str): oauth code for finishing OAuth login
         Returns:
@@ -829,8 +833,12 @@ class HubAuthenticated(object):
             # add state argument to OAuth url
             state = self.hub_auth.set_state_cookie(self, next_url=self.request.uri)
             login_url = url_concat(login_url, {'state': state})
-        app_log.debug("Redirecting to login url: %s", login_url)
-        return login_url
+        # temporary override at setting level,
+        # to allow any subclass overrides of get_login_url to preserve their effect
+        # for example, APIHandler raises 403 to prevent redirects
+        with mock.patch.dict(self.application.settings, {"login_url": login_url}):
+            app_log.debug("Redirecting to login url: %s", login_url)
+            return super().get_login_url()
 
     def check_hub_user(self, model):
         """Check whether Hub-authenticated user or service should be allowed.
@@ -860,15 +868,15 @@ class HubAuthenticated(object):
         if kind == 'service':
             # it's a service, check hub_services
             if self.hub_services and name in self.hub_services:
-                app_log.debug("Allowing whitelisted Hub service %s", name)
+                app_log.debug("Allowing Hub service %s", name)
                 return model
             else:
                 app_log.warning("Not allowing Hub service %s", name)
                 raise UserNotAllowed(model)
 
         if self.hub_users and name in self.hub_users:
-            # user in whitelist
-            app_log.debug("Allowing whitelisted Hub user %s", name)
+            # user in allowed list
+            app_log.debug("Allowing Hub user %s", name)
             return model
         elif self.hub_groups and set(model['groups']).intersection(self.hub_groups):
             allowed_groups = set(model['groups']).intersection(self.hub_groups)
@@ -877,7 +885,7 @@ class HubAuthenticated(object):
                 name,
                 ','.join(sorted(allowed_groups)),
             )
-            # group in whitelist
+            # group in allowed list
             return model
         else:
             app_log.warning("Not allowing Hub user %s", name)
@@ -946,8 +954,7 @@ class HubOAuthCallbackHandler(HubOAuthenticated, RequestHandler):
     .. versionadded: 0.8
     """
 
-    @coroutine
-    def get(self):
+    async def get(self):
         error = self.get_argument("error", False)
         if error:
             msg = self.get_argument("error_description", error)

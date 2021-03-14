@@ -7,13 +7,11 @@ import time
 from subprocess import check_output
 from subprocess import PIPE
 from subprocess import Popen
-from subprocess import run
 from tempfile import NamedTemporaryFile
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pytest
-from tornado import gen
 from traitlets.config import Config
 
 from .. import orm
@@ -93,7 +91,7 @@ def test_generate_config():
     os.remove(cfg_file)
     assert cfg_file in out
     assert 'Spawner.cmd' in cfg_text
-    assert 'Authenticator.whitelist' in cfg_text
+    assert 'Authenticator.allowed_users' in cfg_text
 
 
 async def test_init_tokens(request):
@@ -199,6 +197,18 @@ def test_cookie_secret_env(tmpdir, request):
         hub.init_secrets()
     assert hub.cookie_secret == binascii.a2b_hex('abc123')
     assert not os.path.exists(hub.cookie_secret_file)
+
+
+def test_cookie_secret_string_():
+    cfg = Config()
+
+    cfg.JupyterHub.cookie_secret = "not hex"
+    with pytest.raises(ValueError):
+        JupyterHub(config=cfg)
+
+    cfg.JupyterHub.cookie_secret = "abc123"
+    app = JupyterHub(config=cfg)
+    assert app.cookie_secret == binascii.a2b_hex('abc123')
 
 
 async def test_load_groups(tmpdir, request):
