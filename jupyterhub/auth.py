@@ -2,18 +2,18 @@
 # Copyright (c) IPython Development Team.
 # Distributed under the terms of the Modified BSD License.
 import inspect
+import os
 import pipes
 import re
 import sys
-import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from multiprocessing import Process
 from shutil import which
 from subprocess import PIPE
 from subprocess import Popen
 from subprocess import STDOUT
-from multiprocessing import Process
 
 try:
     import pamela
@@ -166,12 +166,12 @@ class Authenticator(LoggingConfigurable):
             )
             setattr(self, new_attr, change.new)
 
-    @observe('allowed_users')
+    @observe("allowed_users")
     def _check_allowed_users(self, change):
-        short_names = [name for name in change['new'] if len(name) <= 1]
+        short_names = [name for name in change["new"] if len(name) <= 1]
         if short_names:
             sorted_names = sorted(short_names)
-            single = ''.join(sorted_names)
+            single = "".join(sorted_names)
             string_set_typo = "set('%s')" % single
             self.log.warning(
                 "Allowed set contains single-character names: %s; did you mean set([%r]) instead of %s?",
@@ -217,11 +217,11 @@ class Authenticator(LoggingConfigurable):
         """
     ).tag(config=True)
 
-    @observe('username_pattern')
+    @observe("username_pattern")
     def _username_pattern_changed(self, change):
-        if not change['new']:
+        if not change["new"]:
             self.username_regex = None
-        self.username_regex = re.compile(change['new'])
+        self.username_regex = re.compile(change["new"])
 
     username_regex = Any(
         help="""
@@ -234,7 +234,7 @@ class Authenticator(LoggingConfigurable):
 
         Return True if username is valid, False otherwise.
         """
-        if '/' in username:
+        if "/" in username:
             # / is not allowed in usernames
             return False
         if not username:
@@ -314,9 +314,9 @@ class Authenticator(LoggingConfigurable):
         # handles deprecated signature *and* name
         # with correct subclass override priority!
         for old_name, new_name in (
-            ('check_whitelist', 'check_allowed'),
-            ('check_blacklist', 'check_blocked_users'),
-            ('check_group_whitelist', 'check_allowed_groups'),
+            ("check_whitelist", "check_allowed"),
+            ("check_blacklist", "check_blocked_users"),
+            ("check_group_whitelist", "check_allowed_groups"),
         ):
             old_method = getattr(self, old_name, None)
             if old_method is None:
@@ -348,7 +348,7 @@ class Authenticator(LoggingConfigurable):
 
             # deprecate pre-1.0 method signatures
             signature = inspect.signature(old_method)
-            if 'authentication' not in signature.parameters and not any(
+            if "authentication" not in signature.parameters and not any(
                 param.kind == inspect.Parameter.VAR_KEYWORD
                 for param in signature.parameters.values()
             ):
@@ -473,17 +473,17 @@ class Authenticator(LoggingConfigurable):
         if authenticated is None:
             return
         if isinstance(authenticated, dict):
-            if 'name' not in authenticated:
+            if "name" not in authenticated:
                 raise ValueError("user missing a name: %r" % authenticated)
         else:
-            authenticated = {'name': authenticated}
-        authenticated.setdefault('auth_state', None)
+            authenticated = {"name": authenticated}
+        authenticated.setdefault("auth_state", None)
         # Leave the default as None, but reevaluate later post-allowed-check
-        authenticated.setdefault('admin', None)
+        authenticated.setdefault("admin", None)
 
         # normalize the username
-        authenticated['name'] = username = self.normalize_username(
-            authenticated['name']
+        authenticated["name"] = username = self.normalize_username(
+            authenticated["name"]
         )
         if not self.validate_username(username):
             self.log.warning("Disallowing invalid username %r.", username)
@@ -501,8 +501,8 @@ class Authenticator(LoggingConfigurable):
             return
 
         if allowed_pass:
-            if authenticated['admin'] is None:
-                authenticated['admin'] = await maybe_future(
+            if authenticated["admin"] is None:
+                authenticated["admin"] = await maybe_future(
                     self.is_admin(handler, authenticated)
                 )
 
@@ -556,7 +556,7 @@ class Authenticator(LoggingConfigurable):
                 The admin status of the user, or None if it could not be
                 determined or should not change.
         """
-        return True if authentication['name'] in self.admin_users else None
+        return True if authentication["name"] in self.admin_users else None
 
     async def authenticate(self, handler, data):
         """Authenticate a user with login form data
@@ -664,7 +664,7 @@ class Authenticator(LoggingConfigurable):
         Returns:
             str: The login URL, e.g. '/hub/login'
         """
-        return url_path_join(base_url, 'login')
+        return url_path_join(base_url, "login")
 
     def logout_url(self, base_url):
         """Override when registering a custom logout handler
@@ -679,7 +679,7 @@ class Authenticator(LoggingConfigurable):
         Returns:
             str: The logout URL, e.g. '/hub/logout'
         """
-        return url_path_join(base_url, 'logout')
+        return url_path_join(base_url, "logout")
 
     def get_handlers(self, app):
         """Return any custom handlers the authenticator needs to register
@@ -694,7 +694,7 @@ class Authenticator(LoggingConfigurable):
                 list of ``('/url', Handler)`` tuples passed to tornado.
                 The Hub prefix is added to any URLs.
         """
-        return [('/login', LoginHandler)]
+        return [("/login", LoginHandler)]
 
 
 def _deprecated_method(old_name, new_name, version):
@@ -772,17 +772,17 @@ class LocalAuthenticator(Authenticator):
         """
     ).tag(config=True)
 
-    @default('add_user_cmd')
+    @default("add_user_cmd")
     def _add_user_cmd_default(self):
         """Guess the most likely-to-work adduser command for each platform"""
-        if sys.platform == 'darwin':
+        if sys.platform == "darwin":
             raise ValueError("I don't know how to create users on OS X")
-        elif which('pw'):
+        elif which("pw"):
             # Probably BSD
-            return ['pw', 'useradd', '-m']
+            return ["pw", "useradd", "-m"]
         else:
             # This appears to be the Linux non-interactive adduser command:
-            return ['adduser', '-q', '--gecos', '""', '--disabled-password']
+            return ["adduser", "-q", "--gecos", '""', "--disabled-password"]
 
     uids = Dict(
         help="""
@@ -805,7 +805,7 @@ class LocalAuthenticator(Authenticator):
         """
     ).tag(config=True)
 
-    @observe('allowed_groups')
+    @observe("allowed_groups")
     def _allowed_groups_changed(self, change):
         """Log a warning if mutually exclusive user and group allowed sets are specified."""
         if self.allowed_users:
@@ -829,7 +829,7 @@ class LocalAuthenticator(Authenticator):
             try:
                 group = self._getgrnam(grnam)
             except KeyError:
-                self.log.error('No such group: [%s]' % grnam)
+                self.log.error("No such group: [%s]" % grnam)
                 continue
             if username in group.gr_mem:
                 return True
@@ -897,18 +897,18 @@ class LocalAuthenticator(Authenticator):
         Tested to work on FreeBSD and Linux, at least.
         """
         name = user.name
-        cmd = [arg.replace('USERNAME', name) for arg in self.add_user_cmd]
+        cmd = [arg.replace("USERNAME", name) for arg in self.add_user_cmd]
         try:
             uid = self.uids[name]
-            cmd += ['--uid', '%d' % uid]
+            cmd += ["--uid", "%d" % uid]
         except KeyError:
             self.log.debug("No UID for user %s" % name)
         cmd += [name]
-        self.log.info("Creating user: %s", ' '.join(map(pipes.quote, cmd)))
+        self.log.info("Creating user: %s", " ".join(map(pipes.quote, cmd)))
         p = Popen(cmd, stdout=PIPE, stderr=STDOUT)
         p.wait()
         if p.returncode:
-            err = p.stdout.read().decode('utf8', 'replace')
+            err = p.stdout.read().decode("utf8", "replace")
             raise RuntimeError("Failed to create system user %s: %s" % (name, err))
 
 
@@ -918,19 +918,19 @@ class PAMAuthenticator(LocalAuthenticator):
     # run PAM in a thread, since it can be slow
     executor = Any()
 
-    @default('executor')
+    @default("executor")
     def _default_executor(self):
         return ThreadPoolExecutor(1)
 
     encoding = Unicode(
-        'utf8',
+        "utf8",
         help="""
         The text encoding to use when communicating with PAM
         """,
     ).tag(config=True)
 
     service = Unicode(
-        'login',
+        "login",
         help="""
         The name of the PAM service to use for authentication
         """,
@@ -994,7 +994,7 @@ class PAMAuthenticator(LocalAuthenticator):
         """PAM admin status checker. Returns Bool to indicate user admin status."""
         # Checks upper level function (admin_users)
         admin_status = super().is_admin(handler, authentication)
-        username = authentication['name']
+        username = authentication["name"]
 
         # If not yet listed as an admin, and admin_groups is on, use it authoritatively
         if not admin_status and self.admin_groups:
@@ -1038,10 +1038,10 @@ class PAMAuthenticator(LocalAuthenticator):
         # we use lowercase username, since JupyterHub is using the lowercase later anyway. There are
         # system calls with this lowercase username. So this lowercase username must exist, otherwise
         # system calls will fail. So the user has to be added as lower case either way...
-        username = data['username'].lower()
+        username = data["username"].lower()
         try:
             pamela.authenticate(
-                username, data['password'], service=self.service, encoding=self.encoding
+                username, data["password"], service=self.service, encoding=self.encoding
             )
         except pamela.PAMError as e:
             if handler is not None:
@@ -1089,8 +1089,8 @@ class PAMAuthenticator(LocalAuthenticator):
         # create a PAM handle
         try:
             handle = pamela.pam_start(
-                    username=username, service=service, encoding=encoding
-                    )
+                username=username, service=service, encoding=encoding
+            )
         except pamela.PAMError as e:
             self.log.warning("Failed to create PAM handle for %s: %s", username, e)
             self.log.warning("Disabling PAM sessions from now on.")
@@ -1098,6 +1098,7 @@ class PAMAuthenticator(LocalAuthenticator):
         # we save the handle in the spawner, then we can reuse it, when the
         # session needs to be closed in the post_spawn_stop
         spawner.PAM_handle = handle
+
         def preexec_fn():
             # process needs to be root to get through the PAM stack
             os.setuid(0)
@@ -1106,11 +1107,11 @@ class PAMAuthenticator(LocalAuthenticator):
             retval = pamela.PAM_OPEN_SESSION(handle, 0)
             if retval != 0:
                 print(
-                        "Failed to open PAM session for {}: PAMError {}".format(
-                                user.name, retval
-                                ),
-                        file=sys.stderr
-                        )
+                    "Failed to open PAM session for {}: PAMError {}".format(
+                        user.name, retval
+                    ),
+                    file=sys.stderr,
+                )
 
             # now set the uid and gid of the user
             user_preexec_fn()
@@ -1126,16 +1127,19 @@ class PAMAuthenticator(LocalAuthenticator):
         #     return
         self.log.info("Going to close PAM session")
         try:
-            p = Process(target=close_session_per_handle, args=(
-                    spawner.PAM_handle, self.log
-                    ))
+            p = Process(
+                target=close_session_per_handle, args=(spawner.PAM_handle, self.log)
+            )
             p.start()
             p.join()
         except AttributeError:
-            self.log.warning("Could´t get PAM_handle. Trying to close PAM session differently...")
-            p = Process(target=close_session_per_username, args=(
-                    user.name, self.service, self.encoding, self.log
-                    ))
+            self.log.warning(
+                "Could´t get PAM_handle. Trying to close PAM session differently..."
+            )
+            p = Process(
+                target=close_session_per_username,
+                args=(user.name, self.service, self.encoding, self.log),
+            )
             p.start()
             p.join()
 
@@ -1153,14 +1157,18 @@ class PAMAuthenticator(LocalAuthenticator):
         else:
             return super().normalize_username(username)
 
+
 def close_session_per_handle(handle, log):
     os.setuid(0)
     os.setgid(0)
     retval = pamela.PAM_CLOSE_SESSION(handle, 0)
     if retval != 0:
-        log.warning("Failed to close PAM session for {}: PAMError {}".format(
-                user.name, retval
-                ))
+        log.warning(
+            "Failed to close PAM session with handle {}: PAMError {}".format(
+                handle, retval
+            )
+        )
+
 
 def close_session_per_username(username, service, encoding, log):
     os.setuid(0)
@@ -1168,7 +1176,8 @@ def close_session_per_username(username, service, encoding, log):
     try:
         pamela.close_session(username, service=service, encoding=encoding)
     except pamela.PAMError as e:
-        log.warning("Failed to close PAM session for %s: %s", user.name, e)
+        log.warning("Failed to close PAM session for %s: %s", username, e)
+
 
 for _old_name, _new_name, _version in [
     ("check_group_whitelist", "check_group_allowed", "1.2"),
@@ -1202,7 +1211,7 @@ class DummyAuthenticator(Authenticator):
     async def authenticate(self, handler, data):
         """Checks against a global password if it's been set. If not, allow any user/pass combo"""
         if self.password:
-            if data['password'] == self.password:
-                return data['username']
+            if data["password"] == self.password:
+                return data["username"]
             return None
-        return data['username']
+        return data["username"]
